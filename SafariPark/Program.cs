@@ -32,10 +32,9 @@ internal static class Program
     {
         if (ParseSize(args) is { } size) (_width, _height) = size;
         var headless = ParseInt(args, "--headless");
-        s_controlIndex = ParseInt(args, "--control");
         var screenshot = ParseValue(args, "--screenshot");
         s_dumpAnimals = args.Contains("--dump-animals");
-        SafariPark.SafariGame.NoSkinning = args.Contains("--no-skinning");
+        SafariPark.KittyGame.NoSkinning = args.Contains("--no-skinning");
         if (ParseValue(args, "--teleport") is { } tp &&
             tp.Split(',') is [var tx, var tz] &&
             float.TryParse(tx, out var fx) && float.TryParse(tz, out var fz))
@@ -62,9 +61,9 @@ internal static class Program
     private static int RunWindowed(FeatureSwitches features)
     {
         using var platform = new SdlWindowPlatform();
-        using var window = platform.CreateWindow(new WindowOptions("森林小猫  Forest Cat", _width, _height));
+        using var window = platform.CreateWindow(new WindowOptions("小猫跳树  Kitty Hop", _width, _height));
         using var renderer = new WebGpuRenderer(window.CreateSurface(), logger: s_log.CreateLogger("WebGPU"));
-        using var game = new SafariGame(renderer, features, window.Width, window.Height, s_log.CreateLogger("PbrRenderer"));
+        using var game = new KittyGame(renderer, features, window.Width, window.Height, s_log.CreateLogger("PbrRenderer"));
 
         // CJK font for the Chinese HUD; falls back to ImGui's ASCII default.
         var host = new PhysicalFileSystem();
@@ -133,15 +132,12 @@ internal static class Program
         return 0;
     }
 
-    private static int? s_controlIndex;
-
     private static int RunHeadless(int frames, string? screenshot, FeatureSwitches features)
     {
         // SdlWindowPlatform initializes SDL video; no window is created in headless mode.
         using var platform = new SdlWindowPlatform();
         using var renderer = WebGpuRenderer.CreateHeadless(_width, _height, s_log.CreateLogger("WebGPU"));
-        using var game = new SafariGame(renderer, features, _width, _height, s_log.CreateLogger("PbrRenderer"));
-        if (s_controlIndex is { } ci) game.ControlIndex(ci);
+        using var game = new KittyGame(renderer, features, _width, _height, s_log.CreateLogger("PbrRenderer"));
         if (s_teleport is { } tp) game.DebugTeleport(tp.X, tp.Y);
 
         var host = new PhysicalFileSystem();

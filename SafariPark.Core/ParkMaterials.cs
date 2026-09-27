@@ -5,10 +5,9 @@ using Paradise.Rendering.Pbr;
 
 namespace SafariPark;
 
-/// <summary>Shared flat-color material palette for the whole forest.</summary>
-/// <remarks>Animals reference palette indices through <see cref="SpeciesCatalog.Mat"/> slots;
-/// scenery uses the terrain/vegetation entries directly. One <see cref="PbrRenderer"/> owns
-/// material IDs, so everything is created once at startup.</remarks>
+/// <summary>Shared flat-color material palette for the grove.</summary>
+/// <remarks>Scenery uses the terrain/vegetation entries directly. One <see cref="PbrRenderer"/>
+/// owns material IDs, so everything is created once at startup.</remarks>
 public sealed class ParkMaterials
 {
     // Scenery

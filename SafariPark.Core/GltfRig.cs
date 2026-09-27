@@ -457,7 +457,7 @@ public sealed class RigVisual : IDisposable
         {
             var joints = part.SkinIndex >= 0 ? rig.Skins[part.SkinIndex].Joints.Length : 0;
             var offset = -1;
-            if (joints > 0 && !SafariGame.NoSkinning)
+            if (joints > 0 && !KittyGame.NoSkinning)
             {
                 offset = paletteNext;
                 paletteNext += joints;

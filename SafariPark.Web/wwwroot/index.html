@@ -2,7 +2,7 @@
 <html lang="zh">
 
 <head>
-  <title>森林小猫 Forest Cat</title>
+  <title>小猫跳树 Kitty Hop</title>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="preload" id="webassembly" />
@@ -20,34 +20,20 @@
     }
     #hud h1 { font-size: 14px; margin: 0 0 6px; font-weight: 600; }
     #hud-status { color: #ffd766; margin: 0 0 6px; min-height: 1.2em; }
-    #hud-help { color: #9aa88e; font-size: 11px; line-height: 1.5; margin: 6px 0; }
+    #hud-help { color: #9aa88e; font-size: 11px; line-height: 1.6; margin: 6px 0; }
     #hud-stats { color: #7fa8c9; font-size: 11px; margin: 0; }
-    #roster { list-style: none; margin: 6px 0 0; padding: 0; max-height: 40vh; overflow-y: auto; }
-    #roster li { padding: 2px 6px; border-radius: 4px; cursor: pointer; }
-    #roster li:hover { background: rgba(255, 255, 255, 0.08); }
-    #roster li.sel { background: rgba(255, 215, 102, 0.18); color: #ffd766; }
-    #switch-row { display: flex; gap: 6px; margin: 4px 0; }
-    #switch-row button {
-      flex: 1; background: #2a3324; color: #e8ecdf; border: 1px solid #4a5540;
-      border-radius: 5px; padding: 4px 0; font-size: 12px; cursor: pointer;
-    }
-    #switch-row button:hover { background: #36422e; }
   </style>
 </head>
 
 <body>
   <canvas id="gpu-canvas" width="960" height="600"></canvas>
   <div id="hud">
-    <h1>森林小猫 Forest Cat</h1>
+    <h1>小猫跳树 Kitty Hop</h1>
     <p id="hud-status">正在启动 .NET 运行时…</p>
-    <div id="switch-row">
-      <button id="prev-btn">&lt; 上一只 [Q]</button>
-      <button id="next-btn">下一只 &gt; [Tab]</button>
-    </div>
-    <p id="hud-help">WASD 移动 · Shift 奔跑 · Space 跳跃/树上大跳<br>
-      E 拾取/攀爬/放下 · F 投掷打访客 · 左键拖动旋转 · 滚轮缩放</p>
+    <p id="hud-help">WASD/方向键 跑动 · 撞到树干就抱住<br>
+      树上 W/S 上下爬 · Space 跳/跳下树<br>
+      空中能抓住树干 · 按住左键拖转视角 · 滚轮缩放</p>
     <p id="hud-stats"></p>
-    <ul id="roster"></ul>
   </div>
 </body>
 

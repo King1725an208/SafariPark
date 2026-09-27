@@ -14,7 +14,7 @@ using SafariPark;
 
 namespace SafariPark.Web;
 
-/// <summary>Browser host: drives <see cref="SafariGame"/> from requestAnimationFrame and DOM
+/// <summary>Browser host: drives <see cref="KittyGame"/> from requestAnimationFrame and DOM
 /// input events, and mirrors the HUD into the page. All gameplay lives in the page's JS bridge;
 /// this class only translates between DOM and engine vocabulary.</summary>
 [SupportedOSPlatform("browser")]
@@ -27,7 +27,7 @@ public static partial class Program
     private const int FramesForSuccess = 300;
 
     private static BrowserRenderer? s_renderer;
-    private static SafariGame? s_game;
+    private static KittyGame? s_game;
     private static int s_frames;
     private static bool s_reported;
     private static bool s_failed;
@@ -73,15 +73,13 @@ public static partial class Program
 
             var switches = new FeatureSwitches();
             PbrFeatures.DeclareAll(switches);
-            s_game = new SafariGame(s_renderer, switches, (uint)width, (uint)height,
+            s_game = new KittyGame(s_renderer, switches, (uint)width, (uint)height,
                 ParadiseConsole.CreateLogger("PbrRenderer",
                     new ParadiseConsoleOptions { MinLevel = ParseLevel(logLevel) }),
                 readAsset: name => s_assets.TryGetValue(name, out var b)
                     ? b
                     : throw new FileNotFoundException($"asset '{name}' was not pre-fetched by main.js"));
 
-            PushRoster();
-            s_game.ControlledChanged += _ => PushRoster();
             SetStatusJs($"running · adapter={s_renderer.AdapterInfo}");
             s_windowStartMs = s_clock.Elapsed.TotalMilliseconds;
         }
@@ -179,42 +177,15 @@ public static partial class Program
         s_game?.Resize((uint)Math.Max(1, width), (uint)Math.Max(1, height));
     }
 
-    /// <summary>Roster click — index into <see cref="SafariGame.Roster"/>.</summary>
-    [JSExport]
-    internal static void OnSelectAnimal(int index) => s_game?.ControlIndex(index);
-
-    [JSExport]
-    internal static void OnCycleAnimal(int delta) => s_game?.Switch(delta);
-
     // ------------------------------------------------------------------ test hooks
 
-    /// <summary>Spawns a wanderer of the given species at a treeline point — browser QA.</summary>
-    [JSExport]
-    internal static void DebugSpawnWanderer(int species) =>
-        s_game?.SpawnWanderer((Species)species);
-
-    /// <summary>Drops a throwable at the player's feet — browser QA.</summary>
-    [JSExport]
-    internal static void DebugSpawnItem(int type) =>
-        s_game?.DebugSpawnItemAtPlayer(type);
-
-    /// <summary>Moves the controlled animal near a world point — QA shortcut.</summary>
+    /// <summary>Moves the cat near a world point — QA shortcut.</summary>
     [JSExport]
     internal static void DebugTeleport(float x, float z) => s_game?.DebugTeleport(x, z);
 
-    /// <summary>Spawns a passer-by a few meters ahead of the player — browser QA.</summary>
-    [JSExport]
-    internal static void DebugSpawnNear(int species) =>
-        s_game?.DebugSpawnNear((Species)species);
-
-    /// <summary>Teleports the cat beside the nearest climbable trunk — browser QA.</summary>
+    /// <summary>Teleports the cat beside the nearest trunk — browser QA.</summary>
     [JSExport]
     internal static void DebugTeleportToTree() => s_game?.DebugTeleportToTree();
-
-    /// <summary>Spawns a passer-by ahead of the camera view — browser QA.</summary>
-    [JSExport]
-    internal static void DebugSpawnAhead(int species) =>
-        s_game?.DebugSpawnAhead((Species)species);
 
     /// <summary>Frame CPU split (sim vs renderer), averaged since last call — browser QA.</summary>
     [JSExport]
@@ -226,26 +197,11 @@ public static partial class Program
         s_updateMs = 0; s_renderMs = 0; s_framesInWindow = 0;
         return $"{{\"updateMs\":{u:F2},\"renderMs\":{r:F2}}}";
     }
-    /// <summary>JSON snapshot of the controlled animal's physics state — browser QA.</summary>
+    /// <summary>JSON snapshot of the cat's physics state — browser QA.</summary>
     [JSExport]
     internal static string DebugCatState() => s_game?.DebugCatState() ?? "{}";
 
     // ------------------------------------------------------------------ HUD bridge
-
-    /// <summary>Posts the roster to the DOM list. Called once at init and on every control
-    /// change — the roster itself is static, only the selection marker moves.</summary>
-    private static void PushRoster()
-    {
-        if (s_game is null) return;
-        var roster = s_game.Roster;
-        var flat = new string[roster.Count * 2];
-        for (int i = 0; i < roster.Count; i++)
-        {
-            flat[i * 2] = roster[i].Label;
-            flat[i * 2 + 1] = roster[i].Species;
-        }
-        SetRosterJs(flat, s_game.ControlledIndex);
-    }
 
     private static KeyboardKey? MapKey(string code) => code switch
     {
@@ -290,7 +246,4 @@ public static partial class Program
 
     [JSImport("setStats", HostModule)]
     private static partial void SetStatsJs(string text);
-
-    [JSImport("setRoster", HostModule)]
-    private static partial void SetRosterJs(string[] labelsAndSpecies, int selected);
 }

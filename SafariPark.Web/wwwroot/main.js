@@ -19,14 +19,10 @@ try {
     canvas.height = Math.floor(canvas.clientHeight * dpr);
 
 
-    // Every GLB the park mounts (animals + scenery). The simulation reads assets
-    // synchronously, so all bytes land in the managed table before InitAsync builds the world.
-    const assets = [
-        'alpaca.glb', 'cat.glb', 'deer.glb', 'fox.glb', 'horse.glb', 'husky.glb',
-        'muledeer.glb', 'rabbit.glb', 'ranger.glb', 'stag.glb', 'wolf.glb',
-        'pine1.glb', 'pine2.glb', 'pine3.glb', 'twist1.glb', 'twist2.glb', 'twist3.glb',
-        'rock1.glb', 'rock2.glb', 'rock3.glb', 'plant.glb', 'plantbig.glb',
-    ];
+    // The only GLB the lite build mounts is the kitten; trees are procedural.
+    // The simulation reads assets synchronously, so bytes land in the managed
+    // table before InitAsync builds the world.
+    const assets = ['cat.glb'];
     status.textContent = '下载模型…';
     await Promise.all(assets.map(async (name) => {
         const response = await fetch(`assets/${name}`);
@@ -36,7 +32,7 @@ try {
 
     const hostModuleUrl = new URL('safari-host.js', document.baseURI).href;
     await program.InitAsync(hostModuleUrl, canvas.width, canvas.height, query.get('log') || '');
-    window.__safariProgram = program; // roster click handlers reach back through here
+    window.__safariProgram = program; // QA hooks reachable from the console
 
     let lastTs = 0;
     const frame = (ts) => {
@@ -82,9 +78,6 @@ try {
         const h = Math.floor(canvas.clientHeight * dpr);
         if (w > 0 && h > 0) { canvas.width = w; canvas.height = h; program.OnResize(w, h); }
     }).observe(canvas);
-
-    document.getElementById('prev-btn').addEventListener('click', () => program.OnCycleAnimal(-1));
-    document.getElementById('next-btn').addEventListener('click', () => program.OnCycleAnimal(1));
 } catch (error) {
     status.textContent = `SAFARI-FAIL: ${error && error.message ? error.message : error}`;
     console.error(error);

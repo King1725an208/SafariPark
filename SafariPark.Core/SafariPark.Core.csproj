@@ -8,10 +8,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>SafariPark</RootNamespace>
     <IsPackable>false</IsPackable>
-    <!-- The ECS generator emits component/tag glue into this project. -->
-    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
-    <!-- PECS016: single-field components used as data carriers are intentional here. -->
-    <NoWarn>$(NoWarn);PECS016;CA1515</NoWarn>
+    <NoWarn>$(NoWarn);CA1515</NoWarn>
     <!-- Simulation core is shared by the desktop and browser hosts — it must stay
          platform-agnostic (no SDL, no ImGui). -->
     <SupportedOSPlatformVersion>browser-wasm</SupportedOSPlatformVersion>
@@ -23,15 +20,8 @@
     <ProjectReference Include="..\ParadiseEngine\src\Paradise.Assets.Gltf\Paradise.Assets.Gltf.csproj" />
     <ProjectReference Include="..\ParadiseEngine\src\Paradise.Rendering.Pbr\Paradise.Rendering.Pbr.csproj" />
     <ProjectReference Include="..\ParadiseEngine\src\Paradise.Windowing\Paradise.Windowing.csproj" />
-    <ProjectReference Include="..\ParadiseEngine\src\Paradise.ECS\Paradise.ECS.csproj" />
-    <ProjectReference Include="..\ParadiseEngine\src\Paradise.ECS.Tag\Paradise.ECS.Tag.csproj" />
-    <ProjectReference Include="..\ParadiseEngine\src\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\ParadiseEngine\src\Paradise.Animation\Paradise.Animation.csproj" />
     <ProjectReference Include="..\ParadiseEngine\src\Paradise.BLOB\Paradise.BLOB.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Using Include="Paradise.ECS" />
   </ItemGroup>
 
 </Project>
