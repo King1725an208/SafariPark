@@ -7,8 +7,8 @@ namespace SafariPark;
 /// camera sampling the same ground. RH, Y-up, −Z forward, meters.</summary>
 public static class Terrain
 {
-    /// <summary>Half-extent of the playable area: a ~46×46 m grove.</summary>
-    public const float HalfSize = 23f;
+    /// <summary>Half-extent of the playable area: a ~24×24 m grove.</summary>
+    public const float HalfSize = 12f;
 
     /// <summary>Ground height: soft mounds only — no pond, no steep slopes.</summary>
     public static float Height(float x, float z)
@@ -31,7 +31,7 @@ public static class Terrain
 
     /// <summary>Ground triangle mesh in the PBR vertex layout (pos3/normal3/uv2/tangent4).</summary>
     /// <returns>Interleaved floats and triangle indices ready for UploadPrimitive.</returns>
-    public static (float[] Vertices, uint[] Indices) BuildMesh(int resolution = 48)
+    public static (float[] Vertices, uint[] Indices) BuildMesh(int resolution = 40)
     {
         int vertsPerSide = resolution + 1;
         var vertices = new float[vertsPerSide * vertsPerSide * 12];

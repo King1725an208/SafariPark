@@ -411,9 +411,12 @@ public sealed class RigVisual : IDisposable
     private Matrix4x4 _model = Matrix4x4.Identity;
 
     /// <summary>Pose + placement for all parts; call once per frame after animating.</summary>
-    public void SetModel(Vector3 position, float yaw)
+    /// <param name="pitch">Pre-yaw pitch around the model's right axis — a negative value
+    /// tips the nose upward (the cat's climbing pose, belly against the trunk).</param>
+    public void SetModel(Vector3 position, float yaw, float pitch = 0f)
     {
         _model = Matrix4x4.CreateScale(Scale)
+            * (pitch != 0f ? Matrix4x4.CreateRotationX(pitch) : Matrix4x4.Identity)
             * Matrix4x4.CreateRotationY(yaw + YawOffset)
             * Matrix4x4.CreateTranslation(position + new Vector3(0f, GroundOffset, 0f));
         foreach (var part in Parts) part.Instance.Model = _model;

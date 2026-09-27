@@ -7,10 +7,11 @@ using Paradise.Windowing;
 
 namespace SafariPark;
 
-/// <summary>The lite build: one kitten in a small grove of climbable, jumpable trees.
+/// <summary>The lite build: one kitten in a small grove of climbable, platform-topped trees.
 /// Made for kids — bump a trunk to grab it, W/S to climb, Space to leap; airborne cats
-/// auto-catch trunks so tree-to-tree hops are forgiving. No ECS, no extra animals, no
-/// SSAO/contact shadows — just one skinned cat and instanced box trees.</summary>
+/// auto-catch trunks so platform hops are forgiving. Every crown is a walkable platform,
+/// some trees stack two. Stamina drains on running and jumping, berries restore it.
+/// No ECS, no extra animals, no SSAO — one skinned cat and instanced box trees.</summary>
 public sealed class KittyGame : IDisposable
 {
     private readonly IRenderer _renderer;
@@ -25,6 +26,7 @@ public sealed class KittyGame : IDisposable
     private uint _width;
     private uint _height;
     private float _elapsed;
+    private readonly Random _rand = new(20260927);
 
     // ------------------------------------------------------------- cat state (no ECS)
 
@@ -34,26 +36,52 @@ public sealed class KittyGame : IDisposable
     private string _clip = "";
     private Vector3 _pos;
     private float _yaw;
+    private float _pitch;          // model pitch: ~−86° hugging a trunk, 0 elsewhere
     private Vector3 _vel;          // horizontal velocity (kept while airborne)
     private float _vy;             // vertical velocity
     private bool _grounded = true;
     private bool _moving;
-    private int _standingTree = -1; // tree index whose crown we're on, −1 = ground
-    private int _treeHops;          // crowns landed on after a jump — the score
+    private int _standingPerch = -1; // platform index we're standing on, −1 = ground
+    private int _treeHops;           // platforms landed on after a jump — the score
+    private float _stamina = 1f;     // 0..1: running and jumping drain it
+    private float _eatTimer;         // short window after a berry: play the eat clip
 
     // ------------------------------------------------------------- grove
 
-    /// <summary>A climbable trunk plus the flat crown surface on top.</summary>
+    /// <summary>A climbable trunk. Every crown platform above it is a <see cref="Perch"/>.</summary>
     private sealed class Tree
     {
         public required float X;
         public required float Z;
         public required float TrunkTop;    // highest cling height (world Y)
-        public required float PerchTop;    // crown platform Y the cat lands on
-        public required float PerchRadius; // crown platform half-width
+    }
+
+    /// <summary>Flat standable platform — a tree crown top. Several per tree is fine.</summary>
+    private sealed class Perch
+    {
+        public required float X;
+        public required float Z;
+        public required float Radius;
+        public required float Top;
+        public required int TreeIndex;
+    }
+
+    /// <summary>A berry pickup: spin/bob visual; eating it restores stamina.</summary>
+    private sealed class Berry
+    {
+        public required PbrInstance Instance;
+        public required Vector3 Pos;
+        public float Spin;
+        public float Phase;
     }
 
     private readonly List<Tree> _trees = [];
+    private readonly List<Perch> _perches = [];
+    private readonly List<Berry> _berries = [];
+    private PbrMesh _berryMesh = new([]);
+    private float _berryTimer = 2f;
+    private const int MaxBerries = 10;
+    private const float EatRadius = 0.55f;
     private int _cling = -1;               // trunk index while hugging a tree
 
     // ------------------------------------------------------------- camera + input
@@ -72,12 +100,20 @@ public sealed class KittyGame : IDisposable
 
     // Cat feel: brisk run, floaty-forgiving jump, snappy turn.
     private const float RunSpeed = 5.2f;
-    private const float JumpSpeed = 6.8f;
+    private const float JumpSpeed = 7.2f;
     private const float Gravity = 14.5f;
     private const float AirAccel = 22f;
     private const float ClimbSpeed = 2.9f;
+    private const float ClingPitch = -1.5f;   // ~−86°: nose up, belly against the bark
     private const float GrabRadius = 0.58f;   // air auto-grab distance to a trunk
     private const float BumpRadius = 0.33f;   // ground contact grab distance
+
+    // Stamina: running drains 12%/s, a jump costs 15%; resting recovers slowly.
+    private const float RunDrain = 0.12f;
+    private const float JumpCost = 0.15f;
+    private const float IdleRegen = 0.10f;
+    private const float ClingRegen = 0.06f;
+    private const float EatGain = 0.40f;
 
     public KittyGame(IRenderer renderer, FeatureSwitches switches, uint width, uint height,
         Microsoft.Extensions.Logging.ILogger? logger = null, Func<string, byte[]>? readAsset = null)
@@ -109,50 +145,68 @@ public sealed class KittyGame : IDisposable
             Model = Matrix4x4.Identity,
         });
 
-        // Two procedural tree meshes shared by every tree instance — ~100 draws total.
+        // Three procedural tree meshes shared by every instance — each crown is a
+        // walkable platform, and pine/tall trees carry two tiers.
         var pine = BuildPineMesh();
         var round = BuildRoundMesh();
-        var rand = new Random(20260927);
+        var tall = BuildTallMesh();
+        _berryMesh = BuildBerryMesh();
+        var rand = _rand;
 
         void Plant(float x, float z, float scale)
         {
-            bool isPine = rand.NextDouble() < 0.55;
+            float roll = (float)rand.NextDouble();
+            int kind = roll < 0.40f ? 0 : roll < 0.70f ? 1 : 2; // pine / round / tall
             float y = Terrain.Height(x, z);
             var model = Matrix4x4.CreateScale(scale) * Matrix4x4.CreateRotationY((float)rand.NextDouble() * MathF.Tau)
                 * Matrix4x4.CreateTranslation(new Vector3(x, y, z));
-            _scene.Instances.Add(new PbrInstance { Mesh = isPine ? pine : round, Model = model });
-
-            // Mesh-local heights (see the builders): pine clings to 3.0, sits at 3.47;
-            // round clings to 3.4, sits at 4.85 — both scaled.
-            _trees.Add(new Tree
+            _scene.Instances.Add(new PbrInstance
             {
-                X = x, Z = z,
-                TrunkTop = y + (isPine ? 3.0f : 3.4f) * scale,
-                PerchTop = y + (isPine ? 3.47f : 4.85f) * scale,
-                PerchRadius = (isPine ? 0.85f : 1.0f) * scale,
+                Mesh = kind == 0 ? pine : kind == 1 ? round : tall,
+                Model = model,
             });
+
+            int ti = _trees.Count;
+            // Local tops (see the builders): pine platforms 2.90/5.00, round 4.70,
+            // tall 3.70/6.10 — all scaled; cling tops sit just below the highest platform.
+            float trunkTop = kind == 0 ? 4.85f : kind == 1 ? 4.55f : 5.95f;
+            _trees.Add(new Tree { X = x, Z = z, TrunkTop = y + trunkTop * scale });
+            void P(float top, float r) => _perches.Add(new Perch
+            {
+                X = x, Z = z, Top = y + top * scale, Radius = r * scale, TreeIndex = ti,
+            });
+            switch (kind)
+            {
+                case 0: P(2.90f, 1.25f); P(5.00f, 0.90f); break;
+                case 1: P(4.70f, 1.40f); break;
+                default: P(3.70f, 1.30f); P(6.10f, 0.90f); break;
+            }
         }
 
-        // Jittered grid: 4.3 m spacing keeps neighbouring crowns inside jump range.
-        for (float gx = -19f; gx <= 19f; gx += 4.3f)
+        // Jittered grid: ~3.0 m spacing and wide crowns form a dense vertical forest —
+        // neighbouring platforms overlap in jump range at staggered heights.
+        for (float gx = -9.5f; gx <= 9.5f; gx += 3.0f)
         {
-            for (float gz = -19f; gz <= 19f; gz += 4.3f)
+            for (float gz = -9.5f; gz <= 9.5f; gz += 3.0f)
             {
-                float x = gx + ((float)rand.NextDouble() - 0.5f) * 1.5f;
-                float z = gz + ((float)rand.NextDouble() - 0.5f) * 1.5f;
-                if (x * x + z * z < 3.4f * 3.4f) continue; // keep the spawn clearing open
-                if (MathF.Abs(x) > Terrain.HalfSize - 2f || MathF.Abs(z) > Terrain.HalfSize - 2f) continue;
-                Plant(x, z, 0.85f + (float)rand.NextDouble() * 0.3f);
+                float x = gx + ((float)rand.NextDouble() - 0.5f) * 1.1f;
+                float z = gz + ((float)rand.NextDouble() - 0.5f) * 1.1f;
+                if (x * x + z * z < 2.8f * 2.8f) continue; // keep the spawn clearing open
+                if (MathF.Abs(x) > Terrain.HalfSize - 1.5f || MathF.Abs(z) > Terrain.HalfSize - 1.5f) continue;
+                Plant(x, z, 0.75f + (float)rand.NextDouble() * 0.45f);
             }
         }
 
         // Tall boundary ring so the world edge reads as a wall of trees.
-        for (int i = 0; i < 26; i++)
+        for (int i = 0; i < 14; i++)
         {
-            float a = i / 26f * MathF.Tau + (float)rand.NextDouble() * 0.1f;
-            float r = Terrain.HalfSize - 1.4f - (float)rand.NextDouble() * 1.2f;
-            Plant(MathF.Cos(a) * r, MathF.Sin(a) * r, 1.15f + (float)rand.NextDouble() * 0.25f);
+            float a = i / 14f * MathF.Tau + (float)rand.NextDouble() * 0.12f;
+            float r = Terrain.HalfSize - 1.1f - (float)rand.NextDouble() * 0.8f;
+            Plant(MathF.Cos(a) * r, MathF.Sin(a) * r, 1.1f + (float)rand.NextDouble() * 0.25f);
         }
+
+        // Starter berries so the first climb already pays off.
+        for (int i = 0; i < 7; i++) SpawnBerry();
 
         // Bright friendly daylight — one 1024 shadow map, fog closes in early.
         _scene.Lights.Add(new PbrLight
@@ -174,10 +228,10 @@ public sealed class KittyGame : IDisposable
         _scene.Fog = new PbrFog
         {
             Enabled = true,
-            Density = 0.014f,
+            Density = 0.018f,
             Color = new Vector3(0.45f, 0.55f, 0.48f),
-            StartDistance = 14f,
-            MaxDistance = 60f,
+            StartDistance = 10f,
+            MaxDistance = 45f,
         };
         _scene.HasSkyBackground = true;
         _scene.SkyTopColor = new Vector3(0.25f, 0.45f, 0.62f);
@@ -195,24 +249,44 @@ public sealed class KittyGame : IDisposable
         _scene.ContactShadows = new PbrContactShadows { Enabled = false };
     }
 
-    /// <summary>Tiered pine: flat crown-top perch at 3.47 (local units), trunk to 3.0.</summary>
+    /// <summary>Tiered pine: two wide platforms far apart at 2.90 and 5.00 (local units).</summary>
     private PbrMesh BuildPineMesh()
     {
         var b = new MeshBuilder();
-        b.AddBox(0, new Vector3(0.13f, 1.55f, 0.13f), new Vector3(0f, 1.55f, 0f));  // trunk 0..3.1
-        b.AddBox(1, new Vector3(0.95f, 0.42f, 0.95f), new Vector3(0f, 3.05f, 0f));  // tier 2.63..3.47
-        b.AddBox(1, new Vector3(0.62f, 0.38f, 0.62f), new Vector3(0f, 3.55f, 0f));  // tier 3.17..3.93
-        b.AddBox(1, new Vector3(0.36f, 0.30f, 0.36f), new Vector3(0f, 4.02f, 0f));  // tip 3.72..4.32
+        b.AddBox(0, new Vector3(0.14f, 2.40f, 0.14f), new Vector3(0f, 2.40f, 0f));  // trunk 0..4.8
+        b.AddBox(1, new Vector3(1.35f, 0.45f, 1.35f), new Vector3(0f, 2.45f, 0f));  // platform 2.00..2.90
+        b.AddBox(1, new Vector3(0.95f, 0.45f, 0.95f), new Vector3(0f, 4.55f, 0f));  // platform 4.10..5.00
+        b.AddBox(1, new Vector3(0.45f, 0.35f, 0.45f), new Vector3(0f, 5.35f, 0f));  // tip 5.00..5.70
         return Upload(b, _materials.Trunk, _materials.Pine);
     }
 
-    /// <summary>Lollipop broadleaf: flat canopy top at 4.85 (local units), trunk to 3.4.</summary>
+    /// <summary>Lollipop broadleaf: single wide flat platform at 4.70 (local units).</summary>
     private PbrMesh BuildRoundMesh()
     {
         var b = new MeshBuilder();
-        b.AddBox(0, new Vector3(0.15f, 1.75f, 0.15f), new Vector3(0f, 1.75f, 0f));  // trunk 0..3.5
-        b.AddBox(1, new Vector3(1.05f, 0.85f, 1.05f), new Vector3(0f, 4.0f, 0f));   // canopy 3.15..4.85
+        b.AddBox(0, new Vector3(0.15f, 1.90f, 0.15f), new Vector3(0f, 1.90f, 0f));  // trunk 0..3.8
+        b.AddBox(1, new Vector3(1.55f, 0.55f, 1.55f), new Vector3(0f, 4.15f, 0f));  // canopy 3.60..4.70
         return Upload(b, _materials.Trunk, _materials.Canopy);
+    }
+
+    /// <summary>Two-storey broadleaf: mid platform at 3.70, top platform at 6.10 —
+    /// tiers separated by ~2.4 so they read as two distinct floors.</summary>
+    private PbrMesh BuildTallMesh()
+    {
+        var b = new MeshBuilder();
+        b.AddBox(0, new Vector3(0.15f, 3.00f, 0.15f), new Vector3(0f, 3.00f, 0f));  // trunk 0..6.0
+        b.AddBox(1, new Vector3(1.45f, 0.50f, 1.45f), new Vector3(0f, 3.20f, 0f));  // platform 2.70..3.70
+        b.AddBox(1, new Vector3(1.00f, 0.50f, 1.00f), new Vector3(0f, 5.60f, 0f));  // platform 5.10..6.10
+        return Upload(b, _materials.Trunk, _materials.CanopyAutumn);
+    }
+
+    /// <summary>Small berry lump — the red mushroom palette reads as fruit.</summary>
+    private PbrMesh BuildBerryMesh()
+    {
+        var b = new MeshBuilder();
+        b.AddBox(0, new Vector3(0.07f, 0.06f, 0.07f), Vector3.Zero);
+        b.AddBox(1, new Vector3(0.02f, 0.03f, 0.02f), new Vector3(0f, 0.08f, 0f)); // stem
+        return Upload(b, _materials.Mushroom, _materials.MushroomStem);
     }
 
     /// <summary>Uploads each MeshBuilder material group and merges into one PbrMesh.</summary>
@@ -285,6 +359,7 @@ public sealed class KittyGame : IDisposable
     {
         _elapsed += dt;
         dt = MathF.Min(dt, 0.05f);
+        if (_eatTimer > 0f) _eatTimer -= dt;
 
         // WASD and arrow keys both move — kids grab whichever.
         _moveInput = new Vector2(
@@ -296,10 +371,32 @@ public sealed class KittyGame : IDisposable
         if (_cling >= 0) TickCling(dt);
         else TickMove(dt);
 
-        // Animation follows physics state.
-        PlayClip(_cling >= 0 ? "Idle" : !_grounded ? "Jump_Loop" : _moving ? "Run" : "Idle");
+        // Stamina follows what the cat is doing.
+        if (_grounded)
+            _stamina += (_moving ? -RunDrain : IdleRegen) * dt;
+        else if (_cling >= 0)
+            _stamina += ClingRegen * dt;
+        else
+            _stamina += 0.02f * dt; // barely resting mid-air
+        _stamina = Math.Clamp(_stamina, 0f, 1f);
+
+        TickBerries(dt);
+
+        // Animation + model pitch follow physics state.
+        string clip = _cling >= 0 ? "Idle"
+            : !_grounded ? "Jump_Loop"
+            : _moving ? "Run"
+            : _eatTimer > 0f ? "Idle_Eating"
+            : "Idle";
+        PlayClip(clip);
+
+        float pitchTarget = _cling >= 0 ? ClingPitch : 0f;
+        _pitch += (pitchTarget - _pitch) * MathF.Min(1f, 12f * dt);
+        if (MathF.Abs(_pitch) < 0.01f && pitchTarget == 0f) _pitch = 0f;
+
         _cat?.AdvanceAndPose(_pbr, dt);
-        _cat?.SetModel(_pos, _yaw);
+        var modelPos = _pos + new Vector3(0f, _pitch * 0.13f, 0f); // hang the body low on the trunk
+        _cat?.SetModel(modelPos, _yaw, _pitch);
 
         _jumpQueued = false;
         UpdateCamera(dt);
@@ -315,7 +412,13 @@ public sealed class KittyGame : IDisposable
         return Vector3.Normalize(fwd * dir.Y + right * dir.X);
     }
 
-    /// <summary>Free movement: run on ground/crowns, steer in the air, land on supports.</summary>
+    /// <summary>Stamina-scaled top speed: 100% at full, 35% when exhausted.</summary>
+    private float SpeedNow => RunSpeed * (0.35f + 0.65f * _stamina);
+
+    /// <summary>Stamina-scaled jump launch speed: 100% at full, 40% when exhausted.</summary>
+    private float JumpNow => JumpSpeed * (0.40f + 0.60f * _stamina);
+
+    /// <summary>Free movement: run on ground/platforms, steer in the air, land on supports.</summary>
     private void TickMove(float dt)
     {
         var move = MoveDir();
@@ -326,7 +429,7 @@ public sealed class KittyGame : IDisposable
             if (_moving)
             {
                 _yaw = TurnToward(_yaw, MathF.Atan2(-move.X, -move.Z), 16f * dt);
-                _vel = move * RunSpeed;
+                _vel = move * SpeedNow;
             }
             else _vel = Vector3.Zero;
             _pos += _vel * dt;
@@ -336,9 +439,10 @@ public sealed class KittyGame : IDisposable
 
             if (_jumpQueued && _cling < 0)
             {
-                _vy = JumpSpeed;
+                _vy = JumpNow;
                 _grounded = false;
-                _standingTree = -1;
+                _standingPerch = -1;
+                _stamina = MathF.Max(0f, _stamina - JumpCost);
             }
         }
         else
@@ -348,7 +452,7 @@ public sealed class KittyGame : IDisposable
                 _vel += move * AirAccel * dt;
             var flat = new Vector3(_vel.X, 0f, _vel.Z);
             float speed = flat.Length();
-            if (speed > RunSpeed * 1.1f) _vel = flat / speed * RunSpeed * 1.1f;
+            if (speed > SpeedNow * 1.1f) _vel = flat / speed * SpeedNow * 1.1f;
             _pos += _vel * dt;
 
             _vy -= Gravity * dt;
@@ -363,49 +467,49 @@ public sealed class KittyGame : IDisposable
 
         if (_cling >= 0) return; // a grab this frame pinned us to the trunk
 
-        float support = SupportHeight(_pos.X, _pos.Y, _pos.Z, out int supportTree);
+        float support = SupportHeight(_pos.X, _pos.Y, _pos.Z, out int supportPerch);
         if (_grounded)
         {
             if (_pos.Y > support + 0.15f)
             {
-                _grounded = false;      // walked off a crown edge
+                _grounded = false;      // walked off a platform edge
                 _vy = 0f;
             }
             else
             {
                 _pos.Y = support;
-                _standingTree = supportTree;
+                _standingPerch = supportPerch;
             }
         }
-        else if (_pos.Y <= support)
-        {
+        else if (_vy <= 0f && _pos.Y <= support) // only land while falling — a rising
+        {                                        // jump is still climbing away
             _pos.Y = support;
             _vy = 0f;
             _grounded = true;
-            if (supportTree >= 0 && supportTree != _standingTree)
+            if (supportPerch >= 0 && supportPerch != _standingPerch)
                 _treeHops++;
-            _standingTree = supportTree;
+            _standingPerch = supportPerch;
             _vel = Vector3.Zero;
         }
     }
 
-    /// <summary>Highest standable surface at a column: terrain or a tree crown platform.</summary>
-    private float SupportHeight(float x, float y, float z, out int treeIndex)
+    /// <summary>Highest standable surface at a column: terrain or a crown platform.</summary>
+    private float SupportHeight(float x, float y, float z, out int perchIndex)
     {
         float top = Terrain.Height(x, z);
         int best = -1;
-        for (int i = 0; i < _trees.Count; i++)
+        for (int i = 0; i < _perches.Count; i++)
         {
-            var t = _trees[i];
-            float dx = x - t.X, dz = z - t.Z;
-            if (dx * dx + dz * dz <= t.PerchRadius * t.PerchRadius &&
-                y >= t.PerchTop - 0.35f && t.PerchTop > top)
+            var p = _perches[i];
+            float dx = x - p.X, dz = z - p.Z;
+            if (dx * dx + dz * dz <= p.Radius * p.Radius &&
+                y >= p.Top - 0.35f && p.Top > top)
             {
-                top = t.PerchTop;
+                top = p.Top;
                 best = i;
             }
         }
-        treeIndex = best;
+        perchIndex = best;
         return top;
     }
 
@@ -415,7 +519,7 @@ public sealed class KittyGame : IDisposable
         for (int i = 0; i < _trees.Count; i++)
         {
             var t = _trees[i];
-            if (_pos.Y > t.TrunkTop - 0.2f) continue; // standing on the crown, above the cling band
+            if (_pos.Y > t.TrunkTop - 0.2f) continue; // above the cling band (on a top crown)
             float dx = t.X - _pos.X, dz = t.Z - _pos.Z;
             float distSq = dx * dx + dz * dz;
             if (distSq > BumpRadius * BumpRadius) continue;
@@ -426,7 +530,7 @@ public sealed class KittyGame : IDisposable
         }
     }
 
-    /// <summary>Airborne cat near a trunk catches it — forgiving tree-to-tree misses.</summary>
+    /// <summary>Airborne cat near a trunk catches it — forgiving platform-hop misses.</summary>
     private void TryAirGrab()
     {
         if (_vy > 3f) return; // let a fresh leap clear the bark first
@@ -449,7 +553,7 @@ public sealed class KittyGame : IDisposable
         _grounded = false;
         _vy = 0f;
         _vel = Vector3.Zero;
-        _standingTree = -1;
+        _standingPerch = -1;
         var t = _trees[index];
         var outDir = new Vector3(_pos.X - t.X, 0f, _pos.Z - t.Z);
         if (outDir.LengthSquared() > 1e-5f) outDir = Vector3.Normalize(outDir);
@@ -460,8 +564,8 @@ public sealed class KittyGame : IDisposable
         _yaw = MathF.Atan2(_pos.X - t.X, _pos.Z - t.Z); // face the trunk (forward −Z)
     }
 
-    /// <summary>On the trunk: W/S slides up/down, A/D orbits the bark, Space leaps off,
-    /// and the top pops the cat onto the crown platform.</summary>
+    /// <summary>On the trunk: W/S slides up/down, A/D orbits the bark, Space leaps off.
+    /// Cling top pops the cat onto that tree's highest platform.</summary>
     private void TickCling(float dt)
     {
         int index = _cling;
@@ -477,20 +581,27 @@ public sealed class KittyGame : IDisposable
         float ground = Terrain.Height(t.X, t.Z);
         _pos.Y = Math.Clamp(_pos.Y + _moveInput.Y * ClimbSpeed * dt, ground + 0.15f, t.TrunkTop);
 
-        // Bottom + pressing down = hop off; top = pop onto the crown.
+        // Bottom + pressing down = hop off; top = pop onto the highest platform.
         if (_pos.Y <= ground + 0.16f && _moveInput.Y < 0f)
         {
             _cling = -1;
             _grounded = true;
-            _standingTree = -1;
+            _standingPerch = -1;
             return;
         }
         if (_pos.Y >= t.TrunkTop - 0.01f)
         {
             _cling = -1;
             _grounded = true;
-            _pos = new Vector3(t.X, t.PerchTop, t.Z);
-            _standingTree = index;
+            // Highest platform on this tree — the crown the trunk dies into.
+            int top = -1;
+            for (int i = 0; i < _perches.Count; i++)
+                if (_perches[i].TreeIndex == index &&
+                    (top < 0 || _perches[i].Top > _perches[top].Top))
+                    top = i;
+            var p = top >= 0 ? _perches[top] : null;
+            _pos = new Vector3(t.X, p?.Top ?? t.TrunkTop, t.Z);
+            _standingPerch = top;
             return;
         }
 
@@ -502,6 +613,66 @@ public sealed class KittyGame : IDisposable
             _vel = outDir * 2.4f;
             _vy = 4.4f;
             _pos += outDir * 0.08f;
+            _stamina = MathF.Max(0f, _stamina - JumpCost * 0.8f);
+        }
+    }
+
+    // ------------------------------------------------------------------ berries
+
+    /// <summary>Spawns a berry: ~half on a random crown platform, half on the grass.</summary>
+    private void SpawnBerry()
+    {
+        Vector3 pos;
+        if (_perches.Count > 0 && _rand.NextDouble() < 0.5)
+        {
+            var p = _perches[_rand.Next(_perches.Count)];
+            float a = (float)_rand.NextDouble() * MathF.Tau;
+            float r = (float)_rand.NextDouble() * p.Radius * 0.6f;
+            pos = new Vector3(p.X + MathF.Cos(a) * r, p.Top + 0.06f, p.Z + MathF.Sin(a) * r);
+        }
+        else
+        {
+            float x = ((float)_rand.NextDouble() * 2f - 1f) * (Terrain.HalfSize - 1.5f);
+            float z = ((float)_rand.NextDouble() * 2f - 1f) * (Terrain.HalfSize - 1.5f);
+            pos = new Vector3(x, Terrain.Height(x, z) + 0.06f, z);
+        }
+        var berry = new Berry
+        {
+            Instance = new PbrInstance { Mesh = _berryMesh },
+            Pos = pos,
+            Spin = (float)_rand.NextDouble() * MathF.Tau,
+            Phase = (float)_rand.NextDouble() * MathF.Tau,
+        };
+        berry.Instance.Model = Matrix4x4.CreateTranslation(pos);
+        _berries.Add(berry);
+        _scene.Instances.Add(berry.Instance);
+    }
+
+    /// <summary>Berry respawns, idle spin/bob, and eating on touch (+35% stamina).</summary>
+    private void TickBerries(float dt)
+    {
+        _berryTimer -= dt;
+        if (_berryTimer <= 0f && _berries.Count < MaxBerries)
+        {
+            _berryTimer = 2.5f + (float)_rand.NextDouble() * 3f;
+            SpawnBerry();
+        }
+
+        for (int i = _berries.Count - 1; i >= 0; i--)
+        {
+            var b = _berries[i];
+            if (Vector3.DistanceSquared(b.Pos, _pos) < EatRadius * EatRadius)
+            {
+                _scene.Instances.Remove(b.Instance);
+                _berries.RemoveAt(i);
+                _stamina = MathF.Min(1f, _stamina + EatGain);
+                _eatTimer = 0.9f;
+                continue;
+            }
+            b.Spin += dt * 2.5f;
+            float bob = MathF.Sin(_elapsed * 3f + b.Phase) * 0.03f;
+            b.Instance.Model = Matrix4x4.CreateRotationY(b.Spin)
+                * Matrix4x4.CreateTranslation(b.Pos + new Vector3(0f, bob, 0f));
         }
     }
 
@@ -540,9 +711,11 @@ public sealed class KittyGame : IDisposable
     /// <summary>Short status line for the HUD header.</summary>
     public string HudStatus()
     {
-        var s = $"小猫 · 跳了 {_treeHops} 次";
+        int filled = (int)MathF.Round(_stamina * 10f);
+        var bar = new string('#', filled).PadRight(10, '-');
+        var s = $"小猫 · 体力 [{bar}] {(int)(_stamina * 100f)}% · 跳了 {_treeHops} 次";
         if (_cling >= 0) s += " · 爬树中";
-        else if (_standingTree >= 0) s += " · 在树顶";
+        else if (_standingPerch >= 0) s += " · 在树顶";
         return s;
     }
 
@@ -590,11 +763,12 @@ public sealed class KittyGame : IDisposable
         DebugTeleport(_trees[best].X + 0.45f, _trees[best].Z);
     }
 
-    /// <summary>JSON snapshot for QA: cat position, cling/hop state.</summary>
+    /// <summary>JSON snapshot for QA: cat position, cling/hop/stamina state.</summary>
     public string DebugCatState() =>
         $"{{\"x\":{_pos.X:F2},\"y\":{_pos.Y:F2},\"z\":{_pos.Z:F2}," +
         $"\"cling\":{(_cling >= 0).ToString().ToLowerInvariant()}," +
-        $"\"tree\":{_standingTree},\"hops\":{_treeHops}}}";
+        $"\"perch\":{_standingPerch},\"hops\":{_treeHops},\"stamina\":{_stamina:F2}," +
+        $"\"berries\":{_berries.Count}}}";
 
     /// <summary>Cat position line — parity with the V1 dump flag.</summary>
     public string DebugAnimalPositions() => $"0 小猫 (Cat) @ ({_pos.X:F1},{_pos.Y:F1},{_pos.Z:F1})";

@@ -28,6 +28,7 @@ public sealed class HudPanel
         ImGuiText.Disabled("WASD/方向键 跑动 · 撞到树干就抱住");
         ImGuiText.Disabled("树上 W/S 上下爬 · A/D 绕树干转");
         ImGuiText.Disabled("Space 跳/跳下树 · 空中能抓住树干");
+        ImGuiText.Disabled("跑和跳会消耗体力 · 吃红果子快速恢复");
         ImGuiText.Disabled("按住左键拖转视角 · 滚轮缩放 · Esc 退出");
         ImGuiApi.End();
     }
