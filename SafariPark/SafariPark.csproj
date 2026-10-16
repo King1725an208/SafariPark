@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SafariPark.Core\SafariPark.Core.csproj" />
+    <ProjectReference Include="..\ParadiseEngine\src\Paradise.Assets.Packing\Paradise.Assets.Packing.csproj" />
     <!-- Host-only engine references: SDL windowing, Dawn renderer, ImGui HUD. -->
     <ProjectReference Include="..\ParadiseEngine\src\Paradise.Windowing.Sdl\Paradise.Windowing.Sdl.csproj" />
     <ProjectReference Include="..\ParadiseEngine\src\Paradise.Rendering.WebGPU\Paradise.Rendering.WebGPU.csproj" />

@@ -27,12 +27,19 @@ try {
         'pine1.glb', 'pine2.glb', 'pine3.glb', 'twist1.glb', 'twist2.glb', 'twist3.glb',
         'rock1.glb', 'rock2.glb', 'rock3.glb', 'plant.glb', 'plantbig.glb',
     ];
+    const packUrl = query.get('pack');
     status.textContent = '下载模型…';
-    await Promise.all(assets.map(async (name) => {
-        const response = await fetch(`assets/${name}`);
-        if (!response.ok) throw new Error(`asset ${name}: HTTP ${response.status}`);
-        program.ProvideAsset(name, new Uint8Array(await response.arrayBuffer()));
-    }));
+    if (packUrl) {
+        const response = await fetch(packUrl);
+        if (!response.ok) throw new Error(`asset pack: HTTP ${response.status}`);
+        program.ProvideAssetPack(new Uint8Array(await response.arrayBuffer()));
+    } else {
+        await Promise.all(assets.map(async (name) => {
+            const response = await fetch(`assets/${name}`);
+            if (!response.ok) throw new Error(`asset ${name}: HTTP ${response.status}`);
+            program.ProvideAsset(name, new Uint8Array(await response.arrayBuffer()));
+        }));
+    }
 
     const hostModuleUrl = new URL('safari-host.js', document.baseURI).href;
     await program.InitAsync(hostModuleUrl, canvas.width, canvas.height, query.get('log') || '');

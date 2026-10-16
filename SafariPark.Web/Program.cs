@@ -4,6 +4,7 @@ using System.Runtime.Versioning;
 
 using Microsoft.Extensions.Logging;
 
+using Paradise.Assets.Packing;
 using Paradise.Diagnostics;
 using Paradise.Features;
 using Paradise.Rendering.Browser;
@@ -11,6 +12,8 @@ using Paradise.Rendering.Pbr;
 using Paradise.Windowing;
 
 using SafariPark;
+
+using Zio;
 
 namespace SafariPark.Web;
 
@@ -46,6 +49,18 @@ public static partial class Program
     [JSExport]
     internal static void ProvideAsset(string name, byte[] bytes) => s_assets[name] = bytes;
 
+    private static AssetPackFileSystem? s_pack;
+
+    /// <summary>Mounts the compressed download before startup; bytes are retained by the mount.</summary>
+    [JSExport]
+    internal static void ProvideAssetPack(byte[] bytes)
+    {
+        if (s_game is not null) throw new InvalidOperationException("Provide the pack before InitAsync.");
+        var next = new AssetPackFileSystem(bytes);
+        s_pack?.Dispose();
+        s_pack = next;
+        s_assets.Clear();
+    }
 
     /// <summary>Never invoked — the WebAssembly SDK requires an entry point, but the app is
     /// driven through its [JSExport] surface.</summary>
@@ -76,7 +91,7 @@ public static partial class Program
             s_game = new SafariGame(s_renderer, switches, (uint)width, (uint)height,
                 ParadiseConsole.CreateLogger("PbrRenderer",
                     new ParadiseConsoleOptions { MinLevel = ParseLevel(logLevel) }),
-                readAsset: name => s_assets.TryGetValue(name, out var b)
+                readAsset: name => s_pack is not null ? s_pack.ReadAllBytes("/" + name) : s_assets.TryGetValue(name, out var b)
                     ? b
                     : throw new FileNotFoundException($"asset '{name}' was not pre-fetched by main.js"));
 

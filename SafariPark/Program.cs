@@ -3,6 +3,7 @@ using System.Numerics;
 
 using Microsoft.Extensions.Logging;
 
+using Paradise.Assets.Packing;
 using Paradise.Diagnostics;
 using Paradise.Features;
 using Paradise.Rendering.Pbr;
@@ -12,6 +13,7 @@ using Paradise.Ui.ImGui;
 using Paradise.Windowing;
 using Paradise.Windowing.Sdl;
 
+using Zio;
 using Zio.FileSystems;
 
 using SafariPark;
@@ -48,9 +50,14 @@ internal static class Program
 
         try
         {
+            using var storage = new PhysicalFileSystem();
+            string? packPath = ParseValue(args, "--assets-pack");
+            using var pack = packPath is null ? null : new AssetPackFileSystem(storage,
+                storage.ConvertPathFromInternal(Path.GetFullPath(packPath)));
+            Func<string, byte[]>? readAsset = pack is null ? null : name => pack.ReadAllBytes("/" + name);
             return headless is { } frames
-                ? RunHeadless(frames, screenshot, features)
-                : RunWindowed(features);
+                ? RunHeadless(frames, screenshot, features, readAsset)
+                : RunWindowed(features, readAsset);
         }
         catch (Exception ex)
         {
@@ -59,12 +66,12 @@ internal static class Program
         }
     }
 
-    private static int RunWindowed(FeatureSwitches features)
+    private static int RunWindowed(FeatureSwitches features, Func<string, byte[]>? readAsset)
     {
         using var platform = new SdlWindowPlatform();
         using var window = platform.CreateWindow(new WindowOptions("森林小猫  Forest Cat", _width, _height));
         using var renderer = new WebGpuRenderer(window.CreateSurface(), logger: s_log.CreateLogger("WebGPU"));
-        using var game = new SafariGame(renderer, features, window.Width, window.Height, s_log.CreateLogger("PbrRenderer"));
+        using var game = new SafariGame(renderer, features, window.Width, window.Height, s_log.CreateLogger("PbrRenderer"), readAsset);
 
         // CJK font for the Chinese HUD; falls back to ImGui's ASCII default.
         var host = new PhysicalFileSystem();
@@ -135,12 +142,12 @@ internal static class Program
 
     private static int? s_controlIndex;
 
-    private static int RunHeadless(int frames, string? screenshot, FeatureSwitches features)
+    private static int RunHeadless(int frames, string? screenshot, FeatureSwitches features, Func<string, byte[]>? readAsset)
     {
         // SdlWindowPlatform initializes SDL video; no window is created in headless mode.
         using var platform = new SdlWindowPlatform();
         using var renderer = WebGpuRenderer.CreateHeadless(_width, _height, s_log.CreateLogger("WebGPU"));
-        using var game = new SafariGame(renderer, features, _width, _height, s_log.CreateLogger("PbrRenderer"));
+        using var game = new SafariGame(renderer, features, _width, _height, s_log.CreateLogger("PbrRenderer"), readAsset);
         if (s_controlIndex is { } ci) game.ControlIndex(ci);
         if (s_teleport is { } tp) game.DebugTeleport(tp.X, tp.Y);
 
