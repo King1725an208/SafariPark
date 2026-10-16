@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SafariPark.Core\SafariPark.Core.csproj" />
+    <ProjectReference Include="..\ParadiseEngine\src\Paradise.Assets.Packing\Paradise.Assets.Packing.csproj" />
     <ProjectReference Include="..\ParadiseEngine\src\Paradise.Rendering.Browser\Paradise.Rendering.Browser.csproj" />
     <ProjectReference Include="..\ParadiseEngine\src\Paradise.Rendering.Pbr\Paradise.Rendering.Pbr.csproj" />
     <ProjectReference Include="..\ParadiseEngine\src\Paradise.Diagnostics\Paradise.Diagnostics.csproj" />
